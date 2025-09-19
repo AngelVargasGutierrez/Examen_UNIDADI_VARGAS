@@ -19,32 +19,6 @@ provider "azurerm" {
   features {}
 }
 
-# Variables
-variable "resource_group_name" {
-  description = "Nombre del grupo de recursos"
-  type        = string
-  default     = "rg-movies-analytics"
-}
-
-variable "location" {
-  description = "Ubicación de Azure"
-  type        = string
-  default     = "East US"
-}
-
-variable "sql_admin_username" {
-  description = "Usuario administrador de SQL"
-  type        = string
-  default     = "sqladmin"
-}
-
-variable "sql_admin_password" {
-  description = "Contraseña del administrador de SQL"
-  type        = string
-  sensitive   = true
-  default     = "P@ssw0rd123!"
-}
-
 # Grupo de recursos
 resource "azurerm_resource_group" "main" {
   name     = var.resource_group_name

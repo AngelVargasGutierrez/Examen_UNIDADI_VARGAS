@@ -52,7 +52,7 @@ variable "sql_admin_password" {
   
   validation {
     condition = length(var.sql_admin_password) >= 8 && length(var.sql_admin_password) <= 128 && 
-                can(regex("^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]", var.sql_admin_password))
+                can(regex("^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]+$", var.sql_admin_password))
     error_message = "La contraseña debe tener entre 8 y 128 caracteres e incluir al menos una letra minúscula, una mayúscula, un número y un carácter especial."
   }
 }
