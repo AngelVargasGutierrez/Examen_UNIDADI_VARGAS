@@ -2,12 +2,12 @@ name: Deploy Infrastructure
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ master, develop ]
     paths:
       - '*.tf'
       - '.github/workflows/deploy-infrastructure.yml'
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
     paths:
       - '*.tf'
       - '.github/workflows/deploy-infrastructure.yml'

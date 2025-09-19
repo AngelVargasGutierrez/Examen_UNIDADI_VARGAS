@@ -2,7 +2,7 @@ name: Data Pipeline - CSV to Database
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
     paths:
       - 'movies_dataset.csv'
       - 'scripts/**'
