@@ -1,0 +1,389 @@
+name: Data Pipeline - CSV to Database
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'movies_dataset.csv'
+      - 'scripts/**'
+      - '.github/workflows/data-pipeline.yml'
+  workflow_dispatch:
+    inputs:
+      force_reload:
+        description: 'Force reload all data'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  validate-csv:
+    name: Validate CSV Data
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas numpy sqlalchemy pyodbc azure-storage-blob python-dotenv
+
+    - name: Validate CSV structure
+      run: |
+        python -c "
+        import pandas as pd
+        import sys
+        
+        try:
+            df = pd.read_csv('movies_dataset.csv')
+            print(f'CSV loaded successfully with {len(df)} rows and {len(df.columns)} columns')
+            
+            # Validate required columns
+            required_columns = ['MovieID', 'Title', 'Genre', 'ReleaseYear', 'ReleaseDate', 
+                              'Country', 'BudgetUSD', 'US_BoxOfficeUSD', 'Global_BoxOfficeUSD',
+                              'Opening_Day_SalesUSD', 'One_Week_SalesUSD', 'IMDbRating',
+                              'RottenTomatoesScore', 'NumVotesIMDb', 'NumVotesRT', 'Director', 'LeadActor']
+            
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                print(f'Missing columns: {missing_columns}')
+                sys.exit(1)
+            
+            # Check for null values in critical columns
+            critical_nulls = df[['MovieID', 'Title', 'ReleaseYear']].isnull().sum()
+            if critical_nulls.sum() > 0:
+                print(f'Critical null values found: {critical_nulls.to_dict()}')
+                sys.exit(1)
+                
+            print('CSV validation passed successfully')
+            
+        except Exception as e:
+            print(f'CSV validation failed: {str(e)}')
+            sys.exit(1)
+        "
+
+  create-database-schema:
+    name: Create Database Schema
+    runs-on: ubuntu-latest
+    needs: validate-csv
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Create SQL Schema
+      run: |
+        # Create SQL script for database schema
+        cat > create_schema.sql << 'EOF'
+        -- Create Movies table
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Movies' AND xtype='U')
+        CREATE TABLE Movies (
+            MovieID INT PRIMARY KEY,
+            Title NVARCHAR(500) NOT NULL,
+            Genre NVARCHAR(100),
+            ReleaseYear INT,
+            ReleaseDate DATE,
+            Country NVARCHAR(100),
+            BudgetUSD DECIMAL(15,2),
+            US_BoxOfficeUSD DECIMAL(15,2),
+            Global_BoxOfficeUSD DECIMAL(15,2),
+            Opening_Day_SalesUSD DECIMAL(15,2),
+            One_Week_SalesUSD DECIMAL(15,2),
+            IMDbRating DECIMAL(3,1),
+            RottenTomatoesScore INT,
+            NumVotesIMDb INT,
+            NumVotesRT INT,
+            Director NVARCHAR(200),
+            LeadActor NVARCHAR(200),
+            CreatedAt DATETIME2 DEFAULT GETDATE(),
+            UpdatedAt DATETIME2 DEFAULT GETDATE()
+        );
+
+        -- Create indexes for better performance
+        IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_Movies_ReleaseYear')
+        CREATE INDEX IX_Movies_ReleaseYear ON Movies(ReleaseYear);
+
+        IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_Movies_Genre')
+        CREATE INDEX IX_Movies_Genre ON Movies(Genre);
+
+        IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_Movies_Country')
+        CREATE INDEX IX_Movies_Country ON Movies(Country);
+
+        IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_Movies_Director')
+        CREATE INDEX IX_Movies_Director ON Movies(Director);
+
+        -- Create views for reporting
+        IF NOT EXISTS (SELECT * FROM sys.views WHERE name = 'vw_MoviesByYear')
+        EXEC('
+        CREATE VIEW vw_MoviesByYear AS
+        SELECT 
+            ReleaseYear,
+            COUNT(*) as MovieCount,
+            AVG(BudgetUSD) as AvgBudget,
+            AVG(Global_BoxOfficeUSD) as AvgBoxOffice,
+            AVG(IMDbRating) as AvgIMDbRating,
+            AVG(RottenTomatoesScore) as AvgRTScore
+        FROM Movies 
+        WHERE ReleaseYear IS NOT NULL
+        GROUP BY ReleaseYear
+        ');
+
+        IF NOT EXISTS (SELECT * FROM sys.views WHERE name = 'vw_MoviesByGenre')
+        EXEC('
+        CREATE VIEW vw_MoviesByGenre AS
+        SELECT 
+            Genre,
+            COUNT(*) as MovieCount,
+            AVG(BudgetUSD) as AvgBudget,
+            AVG(Global_BoxOfficeUSD) as AvgBoxOffice,
+            AVG(IMDbRating) as AvgIMDbRating,
+            AVG(RottenTomatoesScore) as AvgRTScore
+        FROM Movies 
+        WHERE Genre IS NOT NULL
+        GROUP BY Genre
+        ');
+
+        IF NOT EXISTS (SELECT * FROM sys.views WHERE name = 'vw_TopMoviesByRevenue')
+        EXEC('
+        CREATE VIEW vw_TopMoviesByRevenue AS
+        SELECT TOP 100
+            MovieID,
+            Title,
+            Genre,
+            ReleaseYear,
+            Country,
+            BudgetUSD,
+            Global_BoxOfficeUSD,
+            (Global_BoxOfficeUSD - BudgetUSD) as Profit,
+            IMDbRating,
+            RottenTomatoesScore,
+            Director,
+            LeadActor
+        FROM Movies 
+        WHERE Global_BoxOfficeUSD IS NOT NULL
+        ORDER BY Global_BoxOfficeUSD DESC
+        ');
+        EOF
+
+    - name: Execute SQL Schema
+      run: |
+        sqlcmd -S ${{ secrets.SQL_SERVER_FQDN }} -d ${{ secrets.DATABASE_NAME }} \
+               -U ${{ secrets.SQL_ADMIN_USERNAME }} -P ${{ secrets.SQL_ADMIN_PASSWORD }} \
+               -i create_schema.sql
+
+  load-data:
+    name: Load CSV Data to Database
+    runs-on: ubuntu-latest
+    needs: create-database-schema
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas numpy sqlalchemy pyodbc azure-storage-blob python-dotenv
+
+    - name: Load data to database
+      env:
+        SQL_SERVER_FQDN: ${{ secrets.SQL_SERVER_FQDN }}
+        DATABASE_NAME: ${{ secrets.DATABASE_NAME }}
+        SQL_ADMIN_USERNAME: ${{ secrets.SQL_ADMIN_USERNAME }}
+        SQL_ADMIN_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD }}
+        FORCE_RELOAD: ${{ github.event.inputs.force_reload }}
+      run: |
+        python -c "
+        import pandas as pd
+        import sqlalchemy as sa
+        from sqlalchemy import create_engine, text
+        import os
+        from datetime import datetime
+        import sys
+
+        # Database connection
+        server = os.environ['SQL_SERVER_FQDN']
+        database = os.environ['DATABASE_NAME']
+        username = os.environ['SQL_ADMIN_USERNAME']
+        password = os.environ['SQL_ADMIN_PASSWORD']
+        force_reload = os.environ.get('FORCE_RELOAD', 'false').lower() == 'true'
+
+        connection_string = f'mssql+pyodbc://{username}:{password}@{server}/{database}?driver=ODBC+Driver+17+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no'
+        
+        try:
+            engine = create_engine(connection_string)
+            
+            # Check if data already exists
+            with engine.connect() as conn:
+                result = conn.execute(text('SELECT COUNT(*) as count FROM Movies'))
+                existing_count = result.fetchone()[0]
+                
+            if existing_count > 0 and not force_reload:
+                print(f'Data already exists ({existing_count} records). Use force_reload=true to reload.')
+                sys.exit(0)
+            
+            # Load CSV
+            print('Loading CSV data...')
+            df = pd.read_csv('movies_dataset.csv')
+            
+            # Data cleaning and transformation
+            print('Cleaning and transforming data...')
+            
+            # Convert date column
+            df['ReleaseDate'] = pd.to_datetime(df['ReleaseDate'], format='%d-%m-%Y', errors='coerce')
+            
+            # Handle numeric columns
+            numeric_columns = ['BudgetUSD', 'US_BoxOfficeUSD', 'Global_BoxOfficeUSD', 
+                             'Opening_Day_SalesUSD', 'One_Week_SalesUSD', 'IMDbRating', 
+                             'RottenTomatoesScore', 'NumVotesIMDb', 'NumVotesRT']
+            
+            for col in numeric_columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Clean text columns
+            text_columns = ['Title', 'Genre', 'Country', 'Director', 'LeadActor']
+            for col in text_columns:
+                df[col] = df[col].astype(str).str.strip()
+                df[col] = df[col].replace('nan', None)
+            
+            # Truncate table if force reload
+            if force_reload and existing_count > 0:
+                print('Force reload enabled. Truncating existing data...')
+                with engine.connect() as conn:
+                    conn.execute(text('TRUNCATE TABLE Movies'))
+                    conn.commit()
+            
+            # Load data to database
+            print(f'Loading {len(df)} records to database...')
+            df.to_sql('Movies', engine, if_exists='append', index=False, method='multi', chunksize=1000)
+            
+            # Verify load
+            with engine.connect() as conn:
+                result = conn.execute(text('SELECT COUNT(*) as count FROM Movies'))
+                final_count = result.fetchone()[0]
+                
+            print(f'Data load completed successfully. Total records: {final_count}')
+            
+        except Exception as e:
+            print(f'Data load failed: {str(e)}')
+            sys.exit(1)
+        "
+
+  data-quality-check:
+    name: Data Quality Check
+    runs-on: ubuntu-latest
+    needs: load-data
+    
+    steps:
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas sqlalchemy pyodbc
+
+    - name: Run data quality checks
+      env:
+        SQL_SERVER_FQDN: ${{ secrets.SQL_SERVER_FQDN }}
+        DATABASE_NAME: ${{ secrets.DATABASE_NAME }}
+        SQL_ADMIN_USERNAME: ${{ secrets.SQL_ADMIN_USERNAME }}
+        SQL_ADMIN_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD }}
+      run: |
+        python -c "
+        import pandas as pd
+        import sqlalchemy as sa
+        from sqlalchemy import create_engine, text
+        import os
+
+        # Database connection
+        server = os.environ['SQL_SERVER_FQDN']
+        database = os.environ['DATABASE_NAME']
+        username = os.environ['SQL_ADMIN_USERNAME']
+        password = os.environ['SQL_ADMIN_PASSWORD']
+
+        connection_string = f'mssql+pyodbc://{username}:{password}@{server}/{database}?driver=ODBC+Driver+17+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no'
+        engine = create_engine(connection_string)
+
+        print('Running data quality checks...')
+        
+        with engine.connect() as conn:
+            # Check total records
+            result = conn.execute(text('SELECT COUNT(*) as total_records FROM Movies'))
+            total_records = result.fetchone()[0]
+            print(f'Total records: {total_records}')
+            
+            # Check for duplicates
+            result = conn.execute(text('SELECT COUNT(*) - COUNT(DISTINCT MovieID) as duplicates FROM Movies'))
+            duplicates = result.fetchone()[0]
+            print(f'Duplicate MovieIDs: {duplicates}')
+            
+            # Check null values in critical columns
+            result = conn.execute(text('''
+                SELECT 
+                    SUM(CASE WHEN Title IS NULL THEN 1 ELSE 0 END) as null_titles,
+                    SUM(CASE WHEN ReleaseYear IS NULL THEN 1 ELSE 0 END) as null_years,
+                    SUM(CASE WHEN Genre IS NULL THEN 1 ELSE 0 END) as null_genres
+                FROM Movies
+            '''))
+            nulls = result.fetchone()
+            print(f'Null values - Titles: {nulls[0]}, Years: {nulls[1]}, Genres: {nulls[2]}')
+            
+            # Check year range
+            result = conn.execute(text('SELECT MIN(ReleaseYear) as min_year, MAX(ReleaseYear) as max_year FROM Movies WHERE ReleaseYear IS NOT NULL'))
+            years = result.fetchone()
+            print(f'Year range: {years[0]} - {years[1]}')
+            
+            # Check rating ranges
+            result = conn.execute(text('''
+                SELECT 
+                    MIN(IMDbRating) as min_imdb, MAX(IMDbRating) as max_imdb,
+                    MIN(RottenTomatoesScore) as min_rt, MAX(RottenTomatoesScore) as max_rt
+                FROM Movies 
+                WHERE IMDbRating IS NOT NULL AND RottenTomatoesScore IS NOT NULL
+            '''))
+            ratings = result.fetchone()
+            print(f'IMDb range: {ratings[0]} - {ratings[1]}, RT range: {ratings[2]} - {ratings[3]}')
+            
+        print('Data quality checks completed successfully')
+        "
+
+  notify-completion:
+    name: Notify Pipeline Completion
+    runs-on: ubuntu-latest
+    needs: [validate-csv, create-database-schema, load-data, data-quality-check]
+    if: always()
+    
+    steps:
+    - name: Notify Success
+      if: needs.data-quality-check.result == 'success'
+      run: |
+        echo "✅ Data pipeline completed successfully"
+        echo "CSV data has been loaded to the database and quality checks passed"
+
+    - name: Notify Failure
+      if: failure()
+      run: |
+        echo "❌ Data pipeline failed"
+        echo "Please check the logs for more details"

@@ -1,0 +1,114 @@
+{
+  "name": "Movies Analysis by Year",
+  "description": "Comprehensive analysis of movies data filtered by release year",
+  "version": "1.0",
+  "parameters": [
+    {
+      "name": "SelectedYear",
+      "type": "Number",
+      "defaultValue": 2020,
+      "description": "Year filter for movie analysis"
+    }
+  ],
+  "dataSource": {
+    "type": "SQL Server",
+    "server": "#{SQL_SERVER_FQDN}#",
+    "database": "#{DATABASE_NAME}#",
+    "authentication": "SQL Server Authentication"
+  },
+  "queries": [
+    {
+      "name": "MoviesByYear",
+      "query": "SELECT ReleaseYear, COUNT(*) as MovieCount, AVG(BudgetUSD) as AvgBudget, AVG(Global_BoxOfficeUSD) as AvgBoxOffice, AVG(IMDbRating) as AvgIMDbRating, AVG(RottenTomatoesScore) as AvgRTScore FROM Movies WHERE ReleaseYear = @SelectedYear GROUP BY ReleaseYear"
+    },
+    {
+      "name": "TopMoviesSelectedYear",
+      "query": "SELECT TOP 10 Title, Genre, BudgetUSD, Global_BoxOfficeUSD, (Global_BoxOfficeUSD - BudgetUSD) as Profit, IMDbRating, RottenTomatoesScore, Director, LeadActor FROM Movies WHERE ReleaseYear = @SelectedYear ORDER BY Global_BoxOfficeUSD DESC"
+    },
+    {
+      "name": "GenreDistribution",
+      "query": "SELECT Genre, COUNT(*) as Count, AVG(IMDbRating) as AvgRating FROM Movies WHERE ReleaseYear = @SelectedYear GROUP BY Genre ORDER BY Count DESC"
+    },
+    {
+      "name": "MonthlyReleases",
+      "query": "SELECT MONTH(ReleaseDate) as Month, COUNT(*) as Releases FROM Movies WHERE ReleaseYear = @SelectedYear AND ReleaseDate IS NOT NULL GROUP BY MONTH(ReleaseDate) ORDER BY Month"
+    }
+  ],
+  "visualizations": [
+    {
+      "type": "Card",
+      "title": "Total Movies",
+      "data": "MoviesByYear[MovieCount]",
+      "position": {"x": 0, "y": 0, "width": 200, "height": 100}
+    },
+    {
+      "type": "Card", 
+      "title": "Average Budget",
+      "data": "MoviesByYear[AvgBudget]",
+      "format": "Currency",
+      "position": {"x": 220, "y": 0, "width": 200, "height": 100}
+    },
+    {
+      "type": "Card",
+      "title": "Average Box Office",
+      "data": "MoviesByYear[AvgBoxOffice]", 
+      "format": "Currency",
+      "position": {"x": 440, "y": 0, "width": 200, "height": 100}
+    },
+    {
+      "type": "Card",
+      "title": "Average IMDb Rating",
+      "data": "MoviesByYear[AvgIMDbRating]",
+      "format": "Decimal",
+      "position": {"x": 660, "y": 0, "width": 200, "height": 100}
+    },
+    {
+      "type": "Table",
+      "title": "Top 10 Movies by Box Office",
+      "data": "TopMoviesSelectedYear",
+      "columns": ["Title", "Genre", "BudgetUSD", "Global_BoxOfficeUSD", "Profit", "IMDbRating", "Director"],
+      "position": {"x": 0, "y": 120, "width": 860, "height": 300}
+    },
+    {
+      "type": "Pie Chart",
+      "title": "Movies by Genre",
+      "data": "GenreDistribution",
+      "legend": "Genre",
+      "values": "Count",
+      "position": {"x": 0, "y": 440, "width": 400, "height": 300}
+    },
+    {
+      "type": "Column Chart",
+      "title": "Monthly Movie Releases",
+      "data": "MonthlyReleases",
+      "xAxis": "Month",
+      "yAxis": "Releases",
+      "position": {"x": 420, "y": 440, "width": 440, "height": 300}
+    },
+    {
+      "type": "Scatter Chart",
+      "title": "Budget vs Box Office Performance",
+      "data": "TopMoviesSelectedYear",
+      "xAxis": "BudgetUSD",
+      "yAxis": "Global_BoxOfficeUSD",
+      "size": "IMDbRating",
+      "legend": "Genre",
+      "position": {"x": 0, "y": 760, "width": 860, "height": 300}
+    }
+  ],
+  "filters": [
+    {
+      "type": "Slicer",
+      "title": "Select Year",
+      "data": "SelectedYear",
+      "position": {"x": 880, "y": 0, "width": 200, "height": 100}
+    }
+  ],
+  "formatting": {
+    "theme": "Corporate",
+    "backgroundColor": "#FFFFFF",
+    "fontFamily": "Segoe UI",
+    "primaryColor": "#0078D4",
+    "secondaryColor": "#106EBE"
+  }
+}
