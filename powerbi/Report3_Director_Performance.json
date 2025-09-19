@@ -1,0 +1,156 @@
+{
+  "name": "Director Performance Analysis",
+  "description": "Analysis of director performance including ratings, box office success, and career metrics",
+  "version": "1.0",
+  "parameters": [
+    {
+      "name": "SelectedYear",
+      "type": "Number",
+      "defaultValue": 2020,
+      "description": "Year filter for director analysis"
+    },
+    {
+      "name": "MinMovies",
+      "type": "Number",
+      "defaultValue": 2,
+      "description": "Minimum number of movies for director inclusion"
+    }
+  ],
+  "dataSource": {
+    "type": "SQL Server",
+    "server": "#{SQL_SERVER_FQDN}#",
+    "database": "#{DATABASE_NAME}#",
+    "authentication": "SQL Server Authentication"
+  },
+  "queries": [
+    {
+      "name": "DirectorMetrics",
+      "query": "SELECT Director, COUNT(*) as MovieCount, AVG(IMDbRating) as AvgRating, AVG(BudgetUSD) as AvgBudget, AVG(Global_BoxOfficeUSD) as AvgRevenue, SUM(Global_BoxOfficeUSD) as TotalRevenue, AVG(CASE WHEN Global_BoxOfficeUSD > BudgetUSD THEN 1.0 ELSE 0.0 END) * 100 as SuccessRate FROM Movies WHERE ReleaseYear = @SelectedYear AND Director IS NOT NULL AND Director != '' GROUP BY Director HAVING COUNT(*) >= @MinMovies"
+    },
+    {
+      "name": "TopDirectors",
+      "query": "SELECT TOP 20 Director, COUNT(*) as MovieCount, AVG(IMDbRating) as AvgRating, SUM(Global_BoxOfficeUSD) as TotalRevenue, AVG(Global_BoxOfficeUSD) as AvgRevenue, STRING_AGG(Genre, ', ') as Genres FROM Movies WHERE ReleaseYear = @SelectedYear AND Director IS NOT NULL AND Director != '' AND Global_BoxOfficeUSD IS NOT NULL GROUP BY Director HAVING COUNT(*) >= @MinMovies ORDER BY AVG(IMDbRating) DESC"
+    },
+    {
+      "name": "DirectorMovieDetails",
+      "query": "SELECT m.Director, m.Title, m.Genre, m.Country, m.IMDbRating, m.BudgetUSD, m.Global_BoxOfficeUSD, (m.Global_BoxOfficeUSD - m.BudgetUSD) as Profit FROM Movies m INNER JOIN (SELECT Director FROM Movies WHERE ReleaseYear = @SelectedYear AND Director IS NOT NULL GROUP BY Director HAVING COUNT(*) >= @MinMovies) d ON m.Director = d.Director WHERE m.ReleaseYear = @SelectedYear ORDER BY m.Director, m.IMDbRating DESC"
+    },
+    {
+      "name": "GenreSpecialization",
+      "query": "SELECT Director, Genre, COUNT(*) as MovieCount, AVG(IMDbRating) as AvgRating, AVG(Global_BoxOfficeUSD) as AvgRevenue FROM Movies WHERE ReleaseYear = @SelectedYear AND Director IS NOT NULL AND Director != '' GROUP BY Director, Genre HAVING COUNT(*) >= 1"
+    },
+    {
+      "name": "RatingDistribution",
+      "query": "SELECT CASE WHEN IMDbRating >= 8.0 THEN 'Excellent (8.0+)' WHEN IMDbRating >= 7.0 THEN 'Good (7.0-7.9)' WHEN IMDbRating >= 6.0 THEN 'Average (6.0-6.9)' ELSE 'Below Average (<6.0)' END as RatingCategory, COUNT(*) as Count, COUNT(DISTINCT Director) as DirectorCount FROM Movies WHERE ReleaseYear = @SelectedYear AND Director IS NOT NULL AND IMDbRating IS NOT NULL GROUP BY CASE WHEN IMDbRating >= 8.0 THEN 'Excellent (8.0+)' WHEN IMDbRating >= 7.0 THEN 'Good (7.0-7.9)' WHEN IMDbRating >= 6.0 THEN 'Average (6.0-6.9)' ELSE 'Below Average (<6.0)' END"
+    },
+    {
+      "name": "CountryDirectors",
+      "query": "SELECT Country, COUNT(DISTINCT Director) as DirectorCount, COUNT(*) as MovieCount, AVG(IMDbRating) as AvgRating FROM Movies WHERE ReleaseYear = @SelectedYear AND Director IS NOT NULL AND Country IS NOT NULL GROUP BY Country HAVING COUNT(DISTINCT Director) >= 2 ORDER BY DirectorCount DESC"
+    }
+  ],
+  "visualizations": [
+    {
+      "type": "Card",
+      "title": "Total Directors",
+      "data": "COUNT(DirectorMetrics[Director])",
+      "format": "Number",
+      "position": {"x": 0, "y": 0, "width": 180, "height": 100}
+    },
+    {
+      "type": "Card",
+      "title": "Avg Rating",
+      "data": "AVERAGE(DirectorMetrics[AvgRating])",
+      "format": "Decimal",
+      "position": {"x": 200, "y": 0, "width": 180, "height": 100}
+    },
+    {
+      "type": "Card",
+      "title": "Total Revenue",
+      "data": "SUM(DirectorMetrics[TotalRevenue])",
+      "format": "Currency",
+      "position": {"x": 400, "y": 0, "width": 180, "height": 100}
+    },
+    {
+      "type": "Card",
+      "title": "Avg Success Rate",
+      "data": "AVERAGE(DirectorMetrics[SuccessRate])",
+      "format": "Percentage",
+      "position": {"x": 600, "y": 0, "width": 180, "height": 100}
+    },
+    {
+      "type": "Table",
+      "title": "Top Directors by Rating",
+      "data": "TopDirectors",
+      "columns": ["Director", "MovieCount", "AvgRating", "TotalRevenue", "AvgRevenue", "Genres"],
+      "position": {"x": 0, "y": 120, "width": 780, "height": 280}
+    },
+    {
+      "type": "Scatter Chart",
+      "title": "Director Performance: Rating vs Revenue",
+      "data": "DirectorMetrics",
+      "xAxis": "AvgRating",
+      "yAxis": "TotalRevenue",
+      "size": "MovieCount",
+      "legend": "Director",
+      "position": {"x": 0, "y": 420, "width": 390, "height": 280}
+    },
+    {
+      "type": "Column Chart",
+      "title": "Movies by Rating Category",
+      "data": "RatingDistribution",
+      "xAxis": "RatingCategory",
+      "yAxis": "Count",
+      "position": {"x": 410, "y": 420, "width": 370, "height": 280}
+    },
+    {
+      "type": "Table",
+      "title": "Director Movie Details",
+      "data": "DirectorMovieDetails",
+      "columns": ["Director", "Title", "Genre", "Country", "IMDbRating", "BudgetUSD", "Global_BoxOfficeUSD", "Profit"],
+      "position": {"x": 0, "y": 720, "width": 780, "height": 300}
+    },
+    {
+      "type": "Treemap",
+      "title": "Genre Specialization",
+      "data": "GenreSpecialization",
+      "category": "Genre",
+      "values": "MovieCount",
+      "position": {"x": 0, "y": 1040, "width": 390, "height": 280}
+    },
+    {
+      "type": "Map",
+      "title": "Directors by Country",
+      "data": "CountryDirectors",
+      "location": "Country",
+      "values": "DirectorCount",
+      "position": {"x": 410, "y": 1040, "width": 370, "height": 280}
+    }
+  ],
+  "filters": [
+    {
+      "type": "Slicer",
+      "title": "Select Year",
+      "data": "SelectedYear",
+      "position": {"x": 800, "y": 0, "width": 180, "height": 100}
+    },
+    {
+      "type": "Slicer",
+      "title": "Min Movies",
+      "data": "MinMovies",
+      "position": {"x": 800, "y": 120, "width": 180, "height": 100}
+    },
+    {
+      "type": "Slicer",
+      "title": "Director Filter",
+      "data": "DirectorMetrics[Director]",
+      "position": {"x": 800, "y": 240, "width": 180, "height": 160}
+    }
+  ],
+  "formatting": {
+    "theme": "Corporate",
+    "backgroundColor": "#F5F5F5",
+    "fontFamily": "Segoe UI",
+    "primaryColor": "#6F42C1",
+    "secondaryColor": "#E83E8C"
+  }
+}

@@ -1,0 +1,139 @@
+{
+  "name": "Financial Performance Analysis",
+  "description": "Financial analysis of movies including budget, revenue, and profitability metrics",
+  "version": "1.0",
+  "parameters": [
+    {
+      "name": "SelectedYear",
+      "type": "Number",
+      "defaultValue": 2020,
+      "description": "Year filter for financial analysis"
+    },
+    {
+      "name": "MinBudget",
+      "type": "Number", 
+      "defaultValue": 1000000,
+      "description": "Minimum budget filter"
+    }
+  ],
+  "dataSource": {
+    "type": "SQL Server",
+    "server": "#{SQL_SERVER_FQDN}#",
+    "database": "#{DATABASE_NAME}#",
+    "authentication": "SQL Server Authentication"
+  },
+  "queries": [
+    {
+      "name": "FinancialMetrics",
+      "query": "SELECT ReleaseYear, SUM(BudgetUSD) as TotalBudget, SUM(Global_BoxOfficeUSD) as TotalRevenue, SUM(Global_BoxOfficeUSD - BudgetUSD) as TotalProfit, AVG((Global_BoxOfficeUSD - BudgetUSD) / NULLIF(BudgetUSD, 0) * 100) as AvgROI FROM Movies WHERE ReleaseYear = @SelectedYear AND BudgetUSD >= @MinBudget AND BudgetUSD IS NOT NULL AND Global_BoxOfficeUSD IS NOT NULL GROUP BY ReleaseYear"
+    },
+    {
+      "name": "ProfitabilityByGenre",
+      "query": "SELECT Genre, COUNT(*) as MovieCount, AVG(BudgetUSD) as AvgBudget, AVG(Global_BoxOfficeUSD) as AvgRevenue, AVG(Global_BoxOfficeUSD - BudgetUSD) as AvgProfit, AVG((Global_BoxOfficeUSD - BudgetUSD) / NULLIF(BudgetUSD, 0) * 100) as AvgROI FROM Movies WHERE ReleaseYear = @SelectedYear AND BudgetUSD >= @MinBudget AND BudgetUSD IS NOT NULL AND Global_BoxOfficeUSD IS NOT NULL GROUP BY Genre ORDER BY AvgProfit DESC"
+    },
+    {
+      "name": "TopProfitableMovies",
+      "query": "SELECT TOP 15 Title, Genre, Country, BudgetUSD, Global_BoxOfficeUSD, (Global_BoxOfficeUSD - BudgetUSD) as Profit, ((Global_BoxOfficeUSD - BudgetUSD) / BudgetUSD * 100) as ROI, IMDbRating, Director FROM Movies WHERE ReleaseYear = @SelectedYear AND BudgetUSD >= @MinBudget AND BudgetUSD IS NOT NULL AND Global_BoxOfficeUSD IS NOT NULL ORDER BY Profit DESC"
+    },
+    {
+      "name": "BudgetDistribution",
+      "query": "SELECT CASE WHEN BudgetUSD < 1000000 THEN 'Low (<1M)' WHEN BudgetUSD < 10000000 THEN 'Medium (1M-10M)' WHEN BudgetUSD < 50000000 THEN 'High (10M-50M)' ELSE 'Blockbuster (>50M)' END as BudgetCategory, COUNT(*) as Count, AVG(Global_BoxOfficeUSD) as AvgRevenue FROM Movies WHERE ReleaseYear = @SelectedYear AND BudgetUSD IS NOT NULL GROUP BY CASE WHEN BudgetUSD < 1000000 THEN 'Low (<1M)' WHEN BudgetUSD < 10000000 THEN 'Medium (1M-10M)' WHEN BudgetUSD < 50000000 THEN 'High (10M-50M)' ELSE 'Blockbuster (>50M)' END"
+    },
+    {
+      "name": "CountryPerformance",
+      "query": "SELECT TOP 10 Country, COUNT(*) as MovieCount, SUM(BudgetUSD) as TotalBudget, SUM(Global_BoxOfficeUSD) as TotalRevenue, AVG((Global_BoxOfficeUSD - BudgetUSD) / NULLIF(BudgetUSD, 0) * 100) as AvgROI FROM Movies WHERE ReleaseYear = @SelectedYear AND BudgetUSD IS NOT NULL AND Global_BoxOfficeUSD IS NOT NULL GROUP BY Country ORDER BY TotalRevenue DESC"
+    }
+  ],
+  "visualizations": [
+    {
+      "type": "Card",
+      "title": "Total Budget",
+      "data": "FinancialMetrics[TotalBudget]",
+      "format": "Currency",
+      "position": {"x": 0, "y": 0, "width": 200, "height": 100}
+    },
+    {
+      "type": "Card",
+      "title": "Total Revenue", 
+      "data": "FinancialMetrics[TotalRevenue]",
+      "format": "Currency",
+      "position": {"x": 220, "y": 0, "width": 200, "height": 100}
+    },
+    {
+      "type": "Card",
+      "title": "Total Profit",
+      "data": "FinancialMetrics[TotalProfit]",
+      "format": "Currency",
+      "position": {"x": 440, "y": 0, "width": 200, "height": 100}
+    },
+    {
+      "type": "Card",
+      "title": "Average ROI",
+      "data": "FinancialMetrics[AvgROI]",
+      "format": "Percentage",
+      "position": {"x": 660, "y": 0, "width": 200, "height": 100}
+    },
+    {
+      "type": "Table",
+      "title": "Top Profitable Movies",
+      "data": "TopProfitableMovies",
+      "columns": ["Title", "Genre", "Country", "BudgetUSD", "Global_BoxOfficeUSD", "Profit", "ROI", "Director"],
+      "position": {"x": 0, "y": 120, "width": 860, "height": 300}
+    },
+    {
+      "type": "Bar Chart",
+      "title": "Profitability by Genre",
+      "data": "ProfitabilityByGenre",
+      "xAxis": "Genre",
+      "yAxis": "AvgProfit",
+      "position": {"x": 0, "y": 440, "width": 430, "height": 300}
+    },
+    {
+      "type": "Donut Chart",
+      "title": "Budget Distribution",
+      "data": "BudgetDistribution",
+      "legend": "BudgetCategory",
+      "values": "Count",
+      "position": {"x": 450, "y": 440, "width": 410, "height": 300}
+    },
+    {
+      "type": "Treemap",
+      "title": "Revenue by Country",
+      "data": "CountryPerformance",
+      "category": "Country",
+      "values": "TotalRevenue",
+      "position": {"x": 0, "y": 760, "width": 430, "height": 300}
+    },
+    {
+      "type": "Scatter Chart",
+      "title": "Budget vs Revenue Analysis",
+      "data": "TopProfitableMovies",
+      "xAxis": "BudgetUSD",
+      "yAxis": "Global_BoxOfficeUSD",
+      "size": "ROI",
+      "legend": "Genre",
+      "position": {"x": 450, "y": 760, "width": 410, "height": 300}
+    }
+  ],
+  "filters": [
+    {
+      "type": "Slicer",
+      "title": "Select Year",
+      "data": "SelectedYear",
+      "position": {"x": 880, "y": 0, "width": 200, "height": 100}
+    },
+    {
+      "type": "Slicer",
+      "title": "Min Budget",
+      "data": "MinBudget",
+      "position": {"x": 880, "y": 120, "width": 200, "height": 100}
+    }
+  ],
+  "formatting": {
+    "theme": "Executive",
+    "backgroundColor": "#F8F9FA",
+    "fontFamily": "Segoe UI",
+    "primaryColor": "#28A745",
+    "secondaryColor": "#20C997"
+  }
+}
